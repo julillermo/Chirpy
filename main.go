@@ -16,6 +16,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
+/* Regarding Flow to reach database */
+// 1. Application receives query
+// 2. database/sql (common built-in API and connection management)
+// 3. database driver (database specific protocol imlementation like lib/pq)
+// 4. database server
+
 type apiHandler struct{}
 
 func (apiHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
@@ -88,7 +94,7 @@ func main() {
 	})
 
 	serveMux.HandleFunc("POST /api/validate_chirp", func(writer http.ResponseWriter, request *http.Request) {
-		//? JULIUS: note that what's shown in is kind of the long way
+		//? JULIUS: note that what's shown here is kind of the long way
 		// Recall that we had json.NewDecoder() vs. Unmarshal.
 		// json.NewEncoder() can be used when preparing JSON for sending as a response
 
@@ -195,6 +201,70 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(200)
 		writer.Write(returnCleanedBodyData)
+	})
+
+	serveMux.HandleFunc("POST /api/users", func(writer http.ResponseWriter, request *http.Request) {
+		type reqJSON struct {
+			Email string `json:"email"`
+		}
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Email     string `json:"email"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		decoder := json.NewDecoder(request.Body)
+		defer request.Body.Close()
+
+		reqJsonDecoded := reqJSON{}
+		err := decoder.Decode(&reqJsonDecoded)
+		if err != nil {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(500)
+			writer.Write(somethingErrorData)
+			return
+		}
+
+		// Transform email into a type compatible with the database
+		emailDbStr := sql.NullString{
+			String: reqJsonDecoded.Email,
+			Valid:  true,
+		}
+
+		userRes, userResErr := apiCfg.dbQueries.CreateUser(request.Context(), emailDbStr)
+		if userResErr != nil {
+			log.Printf("Error with database query: %s", userResErr)
+		}
+
+		userResValue := resJSON{
+			Id:        userRes.ID.String(),
+			CreatedAt: userRes.CreatedAt.Time.String(),
+			UpdatedAt: userRes.UpdatedAt.Time.String(),
+			Email:     userRes.Email.String,
+		}
+
+		userResValueMarshal, userResValueMarshalErr := json.Marshal(userResValue)
+		if userResValueMarshalErr != nil {
+			log.Printf("Error marshalling JSON: %s", userResValueMarshalErr)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(201)
+		writer.Write(userResValueMarshal)
+
+		//? JULIUS: last ended here. Was about to start connecting to psql
 	})
 
 	serveMux.HandleFunc("GET /admin/metrics", func(writer http.ResponseWriter, request *http.Request) {
