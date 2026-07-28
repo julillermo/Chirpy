@@ -1,13 +1,19 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	"github.com/julillermo/Chirpy.git/internal/database"
+	_ "github.com/lib/pq"
 )
 
 type apiHandler struct{}
@@ -24,6 +30,7 @@ func (apiHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
 
 type apiConfig struct {
 	fileserverHits atomic.Int32 // allows modifying and incrementing across goroutines
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -40,12 +47,23 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, psqlConnectionErr := sql.Open("postgres", dbURL)
+	if psqlConnectionErr != nil {
+		log.Printf("Error marshalling JSON: %s", psqlConnectionErr)
+		os.Exit(1)
+	}
+	dbQueries := database.New(db)
+
 	serveMux := http.NewServeMux()
 	serverStruct := &http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,
 	}
-	apiCfg := &apiConfig{}
+	apiCfg := &apiConfig{
+		dbQueries: dbQueries,
+	}
 
 	// serveMux.Handle(
 	// 	"/app/",
