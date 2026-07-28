@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/julillermo/Chirpy.git/internal/database"
 	_ "github.com/lib/pq"
@@ -60,6 +61,8 @@ func main() {
 		log.Printf("Error marshalling JSON: %s", psqlConnectionErr)
 		os.Exit(1)
 	}
+	defer db.Close()
+
 	dbQueries := database.New(db)
 
 	serveMux := http.NewServeMux()
@@ -203,6 +206,85 @@ func main() {
 		writer.Write(returnCleanedBodyData)
 	})
 
+	serveMux.HandleFunc("POST /api/chirps", func(writer http.ResponseWriter, request *http.Request) {
+		type reqJSON struct {
+			Body   string `json:"body"`
+			UserId string `json:"user_id"`
+		}
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Body      string `json:"body"`
+			UserId    string `json:"user_id"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		decoder := json.NewDecoder(request.Body)
+		defer request.Body.Close()
+
+		reqJsonDecoded := reqJSON{}
+		if err := decoder.Decode(&reqJsonDecoded); err != nil {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(500)
+			writer.Write(somethingErrorData)
+			return
+		}
+
+		userID, err := uuid.Parse(reqJsonDecoded.UserId)
+		if err != nil {
+			http.Error(writer, "invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		chirpRes, chirpResErr := apiCfg.dbQueries.CreateChirp(
+			request.Context(),
+			database.CreateChirpParams{
+				Body: reqJsonDecoded.Body,
+				UserID: uuid.NullUUID{
+					UUID:  userID,
+					Valid: true,
+				},
+			})
+		if chirpResErr != nil {
+			log.Printf("Error with database query: %s", chirpResErr)
+			http.Error(writer, "could not create chirp", http.StatusInternalServerError)
+			return
+		}
+
+		chirpResValue := resJSON{
+			// Id        string `json:"id"`
+			// CreatedAt string `json:"created_at"`
+			// UpdatedAt string `json:"updated_at"`
+			// Body      string `json:"body"`
+			// UserId    string `json:"user_id"`
+			Id:        chirpRes.ID.String(),
+			CreatedAt: chirpRes.CreatedAt.Time.String(),
+			UpdatedAt: chirpRes.UpdatedAt.Time.String(),
+			Body:      chirpRes.Body,
+			UserId:    chirpRes.UserID.UUID.String(),
+		}
+
+		chirResValueMarshal, chirResValueMarshalErr := json.Marshal(chirpResValue)
+		if chirResValueMarshalErr != nil {
+			log.Printf("Error marshalling JSON: %s", chirResValueMarshalErr)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(201)
+		writer.Write(chirResValueMarshal)
+	})
+
 	serveMux.HandleFunc("POST /api/users", func(writer http.ResponseWriter, request *http.Request) {
 		type reqJSON struct {
 			Email string `json:"email"`
@@ -237,13 +319,7 @@ func main() {
 			return
 		}
 
-		// Transform email into a type compatible with the database
-		emailDbStr := sql.NullString{
-			String: reqJsonDecoded.Email,
-			Valid:  true,
-		}
-
-		userRes, userResErr := apiCfg.dbQueries.CreateUser(request.Context(), emailDbStr)
+		userRes, userResErr := apiCfg.dbQueries.CreateUser(request.Context(), reqJsonDecoded.Email)
 		if userResErr != nil {
 			log.Printf("Error with database query: %s", userResErr)
 		}
@@ -252,7 +328,7 @@ func main() {
 			Id:        userRes.ID.String(),
 			CreatedAt: userRes.CreatedAt.Time.String(),
 			UpdatedAt: userRes.UpdatedAt.Time.String(),
-			Email:     userRes.Email.String,
+			Email:     userRes.Email,
 		}
 
 		userResValueMarshal, userResValueMarshalErr := json.Marshal(userResValue)
@@ -263,8 +339,6 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(201)
 		writer.Write(userResValueMarshal)
-
-		//? JULIUS: last ended here. Was about to start connecting to psql
 	})
 
 	serveMux.HandleFunc("GET /admin/metrics", func(writer http.ResponseWriter, request *http.Request) {
