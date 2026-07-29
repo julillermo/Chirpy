@@ -8,3 +8,6 @@ VALUES (
   $2
 )
 RETURNING *;
+
+-- name: GetAllChirps :many
+Select * from chirps;

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -206,6 +207,47 @@ func main() {
 		writer.Write(returnCleanedBodyData)
 	})
 
+	serveMux.HandleFunc("GET /api/chirps", func(writer http.ResponseWriter, request *http.Request) {
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Body      string `json:"body"`
+			UserId    string `json:"user_id"`
+		}
+
+		chirpsRes, chirpsResErr := apiCfg.dbQueries.GetAllChirps(request.Context())
+		if chirpsResErr != nil {
+			log.Printf("Error with database query: %s", chirpsResErr)
+			http.Error(writer, "could not create chirp", http.StatusInternalServerError)
+			return
+		}
+
+		response := make([]resJSON, 0, len(chirpsRes))
+		for _, chirp := range chirpsRes {
+			response = append(response, resJSON{
+				Id:        chirp.ID.String(),
+				CreatedAt: chirp.CreatedAt.Time.Format(time.RFC3339),
+				UpdatedAt: chirp.UpdatedAt.Time.Format(time.RFC3339),
+				Body:      chirp.Body,
+				UserId:    chirp.UserID.UUID.String(),
+			})
+		}
+
+		data, err := json.Marshal(response)
+		if err != nil {
+			http.Error(writer, "could not encode chirps", http.StatusInternalServerError)
+			return
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(200)
+		writer.Write(data)
+	})
+
 	serveMux.HandleFunc("POST /api/chirps", func(writer http.ResponseWriter, request *http.Request) {
 		type reqJSON struct {
 			Body   string `json:"body"`
@@ -262,20 +304,13 @@ func main() {
 			return
 		}
 
-		chirpResValue := resJSON{
-			// Id        string `json:"id"`
-			// CreatedAt string `json:"created_at"`
-			// UpdatedAt string `json:"updated_at"`
-			// Body      string `json:"body"`
-			// UserId    string `json:"user_id"`
+		chirResValueMarshal, chirResValueMarshalErr := json.Marshal(resJSON{
 			Id:        chirpRes.ID.String(),
 			CreatedAt: chirpRes.CreatedAt.Time.String(),
 			UpdatedAt: chirpRes.UpdatedAt.Time.String(),
 			Body:      chirpRes.Body,
 			UserId:    chirpRes.UserID.UUID.String(),
-		}
-
-		chirResValueMarshal, chirResValueMarshalErr := json.Marshal(chirpResValue)
+		})
 		if chirResValueMarshalErr != nil {
 			log.Printf("Error marshalling JSON: %s", chirResValueMarshalErr)
 		}
