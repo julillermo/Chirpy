@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -205,6 +206,57 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(200)
 		writer.Write(returnCleanedBodyData)
+	})
+
+	serveMux.HandleFunc("GET /api/chirps/{id}", func(writer http.ResponseWriter, request *http.Request) {
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Body      string `json:"body"`
+			UserId    string `json:"user_id"`
+		}
+
+		idString := request.PathValue("id")
+		uuid, err := uuid.Parse(idString)
+		if err != nil {
+			http.Error(writer, "invalid chirp ID", http.StatusBadRequest)
+			return
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		chirpRes, chirpResErr := apiCfg.dbQueries.GetChirp(request.Context(), uuid)
+		if errors.Is(chirpResErr, sql.ErrNoRows) {
+			writer.WriteHeader(404)
+			return
+		}
+
+		data, err := json.Marshal(resJSON{
+			Id:        chirpRes.ID.String(),
+			CreatedAt: chirpRes.CreatedAt.Time.Format(time.RFC3339),
+			UpdatedAt: chirpRes.UpdatedAt.Time.Format(time.RFC3339),
+			Body:      chirpRes.Body,
+			UserId:    chirpRes.UserID.UUID.String(),
+		})
+		if err != nil {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(500)
+			writer.Write(somethingErrorData)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(200)
+		writer.Write(data)
 	})
 
 	serveMux.HandleFunc("GET /api/chirps", func(writer http.ResponseWriter, request *http.Request) {
