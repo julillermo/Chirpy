@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/julillermo/Chirpy.git/internal/auth"
 	"github.com/julillermo/Chirpy.git/internal/database"
 	_ "github.com/lib/pq"
 )
@@ -48,7 +49,7 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 			cfg.fileserverHits.Add(1)
 
 			writer.Header().Set("Cache-Control", "no-cache")
-			writer.WriteHeader(200)
+			writer.WriteHeader(http.StatusOK)
 
 			next.ServeHTTP(writer, req)
 		},
@@ -92,7 +93,7 @@ func main() {
 
 	serveMux.HandleFunc("GET /api/healthz", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 
 		body := "OK"
 		writer.Write([]byte(body))
@@ -147,14 +148,14 @@ func main() {
 		err := decoder.Decode(&reqJsonDecoded)
 		if err != nil {
 			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(500)
+			writer.WriteHeader(http.StatusInternalServerError)
 			writer.Write(somethingErrorData)
 			return
 		}
 
 		if len(reqJsonDecoded.Body) > 140 {
 			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(400)
+			writer.WriteHeader(http.StatusBadRequest)
 			writer.Write(exceedLengthErrorData)
 			return
 		}
@@ -204,7 +205,7 @@ func main() {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 		writer.Write(returnCleanedBodyData)
 	})
 
@@ -237,7 +238,7 @@ func main() {
 
 		chirpRes, chirpResErr := apiCfg.dbQueries.GetChirp(request.Context(), uuid)
 		if errors.Is(chirpResErr, sql.ErrNoRows) {
-			writer.WriteHeader(404)
+			writer.WriteHeader(http.StatusNotFound)
 			return
 		}
 
@@ -250,12 +251,12 @@ func main() {
 		})
 		if err != nil {
 			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(500)
+			writer.WriteHeader(http.StatusInternalServerError)
 			writer.Write(somethingErrorData)
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 		writer.Write(data)
 	})
 
@@ -296,7 +297,7 @@ func main() {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 		writer.Write(data)
 	})
 
@@ -330,7 +331,7 @@ func main() {
 		reqJsonDecoded := reqJSON{}
 		if err := decoder.Decode(&reqJsonDecoded); err != nil {
 			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(500)
+			writer.WriteHeader(http.StatusInternalServerError)
 			writer.Write(somethingErrorData)
 			return
 		}
@@ -368,13 +369,14 @@ func main() {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(201)
+		writer.WriteHeader(http.StatusCreated)
 		writer.Write(chirResValueMarshal)
 	})
 
 	serveMux.HandleFunc("POST /api/users", func(writer http.ResponseWriter, request *http.Request) {
 		type reqJSON struct {
-			Email string `json:"email"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		type resErr struct {
 			Error string `json:"error"`
@@ -401,12 +403,23 @@ func main() {
 		err := decoder.Decode(&reqJsonDecoded)
 		if err != nil {
 			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(500)
+			writer.WriteHeader(http.StatusInternalServerError)
 			writer.Write(somethingErrorData)
 			return
 		}
 
-		userRes, userResErr := apiCfg.dbQueries.CreateUser(request.Context(), reqJsonDecoded.Email)
+		hashedPW, hashedPWErr := auth.HashPassword(reqJsonDecoded.Password)
+		if hashedPWErr != nil {
+			log.Printf("Error with password hasing : %s", hashedPWErr)
+		}
+
+		userRes, userResErr := apiCfg.dbQueries.CreateUser(
+			request.Context(),
+			database.CreateUserParams{
+				Email:          reqJsonDecoded.Email,
+				HashedPassword: hashedPW,
+			},
+		)
 		if userResErr != nil {
 			log.Printf("Error with database query: %s", userResErr)
 		}
@@ -424,13 +437,87 @@ func main() {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(201)
+		writer.WriteHeader(http.StatusCreated)
 		writer.Write(userResValueMarshal)
+	})
+
+	serveMux.HandleFunc("POST /api/login", func(writer http.ResponseWriter, request *http.Request) {
+		type reqJSON struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Email     string `json:"email"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		decoder := json.NewDecoder(request.Body)
+		defer request.Body.Close()
+
+		reqJsonDecoded := reqJSON{}
+		err := decoder.Decode(&reqJsonDecoded)
+		if err != nil {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusInternalServerError)
+			writer.Write(somethingErrorData)
+			return
+		}
+
+		userRes, userResErr := apiCfg.dbQueries.GetUserByEmail(request.Context(), reqJsonDecoded.Email)
+		if userResErr != nil {
+			log.Printf("Error querying User: %s", userResErr)
+		}
+
+		validPassword, validPasswordErr := auth.CheckPasswordHash(reqJsonDecoded.Password, userRes.HashedPassword)
+		if validPasswordErr != nil {
+			log.Printf("Error validating password hash: %s", validPasswordErr)
+		}
+
+		if !validPassword {
+			incorrectEmailPass, incorrectEmailPassErr := json.Marshal(resErr{
+				Error: "Incorrect email or password",
+			})
+			if incorrectEmailPassErr != nil {
+				log.Printf("Error marshalling JSON: %s", incorrectEmailPassErr)
+			}
+
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusUnauthorized)
+			writer.Write(incorrectEmailPass)
+		} else {
+			userResValueMarshal, userResValueMarshalErr := json.Marshal(resJSON{
+				Id:        userRes.ID.String(),
+				CreatedAt: userRes.CreatedAt.Time.String(),
+				UpdatedAt: userRes.UpdatedAt.Time.String(),
+				Email:     userRes.Email,
+			})
+			if userResValueMarshalErr != nil {
+				log.Printf("Error marshalling JSON: %s", userResValueMarshalErr)
+			}
+
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusOK)
+			writer.Write(userResValueMarshal)
+		}
+
 	})
 
 	serveMux.HandleFunc("GET /admin/metrics", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 
 		body := fmt.Sprintf(`
 		<html>
@@ -444,7 +531,7 @@ func main() {
 	})
 
 	serveMux.HandleFunc("POST /admin/reset", func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(200)
+		writer.WriteHeader(http.StatusOK)
 		apiCfg.fileserverHits.Store(0)
 	})
 

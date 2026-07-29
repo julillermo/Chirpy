@@ -2,12 +2,12 @@
 
 boot.dev backend in go course
 
-# How to setup connection to the databse
+# How to setup connection to the database
 
 0. Prerequisites
    - Install postgresql (or your prefered database)
      - Take note of your "connection string" that follows this format: `postgres://username:password@host:port/database`
-       - Note that note all users have the same access to the databse, so some of the commands in this guide may fail when using a specific user with less permissions.
+       - Note that note all users have the same access to the database, so some of the commands in this guide may fail when using a specific user with less permissions.
      - Save the "connection string" as `DB_URL=<value>`.
      - The specific variable `DB_URL` can be changed as long as it's consistent within the application.
        - Access within the application code via `dbUrl := os.GetEnv("DB_URL")`

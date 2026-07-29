@@ -1,5 +1,6 @@
 main_package = ./
 build_dir = ./bin
+sql_engine = postgres
 
 .PHONY: build
 build:
@@ -21,3 +22,14 @@ clean: confirm
 .PHONY: confirm
 confirm:
 	@echo -n "Are you sure? [y/N]: " && read ans && [ $${ans:-N} = y ]
+
+.PHONY: up
+up:
+	@set -a; . ./.env; set +a; \
+	goose -dir ./sql/schema ${sql_engine} "$$DB_URL" up
+
+.PHONY: down
+down:
+	@set -a; . ./.env; set +a; \
+	goose -dir ./sql/schema ${sql_engine} "$$DB_URL" down
+
