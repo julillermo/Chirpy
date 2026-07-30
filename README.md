@@ -88,3 +88,23 @@ boot.dev backend in go course
    - You may need to transform your variables to align with the types of the functions.
    - You also need to have setup the db connection prior.
    - Refer to example in [main.go](/main.go) as a guide
+
+# Authentication
+
+- This project uses `golang-jwt`. The [documentation](https://golang-jwt.github.io/jwt/usage/create/) appears to be a good base introduction to the concept of JWTs
+- Notes:
+  - **symmetric** vs. **asymmetric** signing:
+    - **symmetric** requires a single key for the process
+    - **asymmetric** expects/requries a public & private key pair for the process
+    - _Note, that the chosen signing method and the type of key must match. Please refer to [Signing Methods](https://golang-jwt.github.io/jwt/usage/signing_methods/) for a complete overview._
+  - **claims**
+    - Generating a token doesn't automatically means it contains claims. These have to be specified.
+      - Following along with the documention, the first basic example does not have claims but the succeeding example shows how to specify them. The first one used `jwt.New(jwt.SigningMethodES256)` while the second one used `jwt.NewWithClaims(jwt.SigningMethodES256, ...)`
+    - Claims are the basis of a user's auth. The [RFC 7519](https://datatracker.ietf.org/doc/html/rfc7519) contains possible claims that can be specified.
+  - **signing methods**
+    > A tokenn is simply a JSON object that is signed by its author. This tells you exactly two things about the data:
+    >
+    > - The auhtor of the token was in possession of the signing secret
+    > - The data has not been modified since it was signed
+    - Symmetric signing methods can use any `[]byte` as a valid secret
+    - Asymmetric signing methods use 2 different keys for signing and verifying

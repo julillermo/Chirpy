@@ -59,6 +59,8 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	platformEnv := os.Getenv("PLATFORM")
+	jwtSecret := os.Getenv("JWT_SECRET")
 	db, psqlConnectionErr := sql.Open("postgres", dbURL)
 	if psqlConnectionErr != nil {
 		log.Printf("Error marshalling JSON: %s", psqlConnectionErr)
@@ -325,6 +327,20 @@ func main() {
 			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
 		}
 
+		authToken, authTokenErr := auth.GetBearerToken(request.Header)
+		if authTokenErr != nil {
+			log.Printf("Error forming bearer token: %s", authTokenErr)
+
+		}
+
+		authenticatedUserUUID, authUserUUIDErr := auth.ValidateJWT(authToken, jwtSecret)
+		if authUserUUIDErr != nil {
+			log.Printf("Error validating JWT: %s", authUserUUIDErr)
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
 		decoder := json.NewDecoder(request.Body)
 		defer request.Body.Close()
 
@@ -336,18 +352,18 @@ func main() {
 			return
 		}
 
-		userID, err := uuid.Parse(reqJsonDecoded.UserId)
-		if err != nil {
-			http.Error(writer, "invalid user ID", http.StatusBadRequest)
-			return
-		}
+		// userID, err := uuid.Parse(reqJsonDecoded.UserId)
+		// if err != nil {
+		// 	http.Error(writer, "invalid user ID", http.StatusBadRequest)
+		// 	return
+		// }
 
 		chirpRes, chirpResErr := apiCfg.dbQueries.CreateChirp(
 			request.Context(),
 			database.CreateChirpParams{
 				Body: reqJsonDecoded.Body,
 				UserID: uuid.NullUUID{
-					UUID:  userID,
+					UUID:  authenticatedUserUUID,
 					Valid: true,
 				},
 			})
@@ -443,8 +459,9 @@ func main() {
 
 	serveMux.HandleFunc("POST /api/login", func(writer http.ResponseWriter, request *http.Request) {
 		type reqJSON struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Email     string `json:"email"`
+			Password  string `json:"password"`
+			ExpiresIn *int   `json:"expires_in_seconds"` // Optional
 		}
 		type resErr struct {
 			Error string `json:"error"`
@@ -454,6 +471,7 @@ func main() {
 			CreatedAt string `json:"created_at"`
 			UpdatedAt string `json:"updated_at"`
 			Email     string `json:"email"`
+			Token     string `json:"token"`
 		}
 
 		somethingError := resErr{
@@ -474,6 +492,15 @@ func main() {
 			writer.WriteHeader(http.StatusInternalServerError)
 			writer.Write(somethingErrorData)
 			return
+		}
+
+		oneHrInSeconds := int(time.Hour.Seconds())
+		if reqJsonDecoded.ExpiresIn != nil {
+			if *reqJsonDecoded.ExpiresIn > oneHrInSeconds {
+				reqJsonDecoded.ExpiresIn = &oneHrInSeconds
+			}
+		} else {
+			reqJsonDecoded.ExpiresIn = &oneHrInSeconds
 		}
 
 		userRes, userResErr := apiCfg.dbQueries.GetUserByEmail(request.Context(), reqJsonDecoded.Email)
@@ -498,11 +525,17 @@ func main() {
 			writer.WriteHeader(http.StatusUnauthorized)
 			writer.Write(incorrectEmailPass)
 		} else {
+			jwtToken, jwtTokenErr := auth.MakeJWT(userRes.ID, jwtSecret, time.Duration(*reqJsonDecoded.ExpiresIn)*time.Second)
+			if jwtTokenErr != nil {
+				log.Printf("Error MakeJWT(): %s", jwtTokenErr)
+			}
+
 			userResValueMarshal, userResValueMarshalErr := json.Marshal(resJSON{
 				Id:        userRes.ID.String(),
 				CreatedAt: userRes.CreatedAt.Time.String(),
 				UpdatedAt: userRes.UpdatedAt.Time.String(),
 				Email:     userRes.Email,
+				Token:     jwtToken,
 			})
 			if userResValueMarshalErr != nil {
 				log.Printf("Error marshalling JSON: %s", userResValueMarshalErr)
@@ -531,8 +564,15 @@ func main() {
 	})
 
 	serveMux.HandleFunc("POST /admin/reset", func(writer http.ResponseWriter, request *http.Request) {
+
+		if platformEnv != "dev" {
+			writer.WriteHeader(http.StatusForbidden)
+			return
+		}
+
 		writer.WriteHeader(http.StatusOK)
-		apiCfg.fileserverHits.Store(0)
+		apiCfg.dbQueries.DeleteAllChirps(request.Context())
+		apiCfg.dbQueries.DeleteAllUsers(request.Context())
 	})
 
 	log.Fatal(serverStruct.ListenAndServe())
