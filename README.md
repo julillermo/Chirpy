@@ -87,12 +87,11 @@ boot.dev backend in go course
 4. Use the generated go query functions as part of your code.
    - You may need to transform your variables to align with the types of the functions.
    - You also need to have setup the db connection prior.
-   - Refer to example in [main.go](/main.go) as a guide
+   - Refer to example in [main.go](/main.go) as a guide.
 
 # Authentication
 
 - This project uses `golang-jwt`. The [documentation](https://golang-jwt.github.io/jwt/usage/create/) appears to be a good base introduction to the concept of JWTs
-- Notes:
   - **symmetric** vs. **asymmetric** signing:
     - **symmetric** requires a single key for the process
     - **asymmetric** expects/requries a public & private key pair for the process
@@ -108,3 +107,5 @@ boot.dev backend in go course
     > - The data has not been modified since it was signed
     - Symmetric signing methods can use any `[]byte` as a valid secret
     - Asymmetric signing methods use 2 different keys for signing and verifying
+- **Refresh Tokens**
+  - Refresh tokens Don't have to be JWTs, they just have to be something used to verify permission to referesh.

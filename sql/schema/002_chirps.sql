@@ -8,7 +8,7 @@ CREATE TABLE chirps (
   
   /* The above is equivalent to this
   - Note that the sql program would automatically decide
-    the constraint name
+    the constraint name if the above is used
   - Note that the type still has to match what it's referencing
   */
   -- user_id UUID,

@@ -571,7 +571,8 @@ func main() {
 		}
 
 		writer.WriteHeader(http.StatusOK)
-		apiCfg.dbQueries.DeleteAllChirps(request.Context())
+		//? Not necessary if DELETE ON CASCADE is specified in db
+		// apiCfg.dbQueries.DeleteAllChirps(request.Context())
 		apiCfg.dbQueries.DeleteAllUsers(request.Context())
 	})
 
