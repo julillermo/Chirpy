@@ -10,10 +10,25 @@ VALUES (
 RETURNING *;
 
 -- name: GetAllChirps :many
-SELECT * FROM chirps;
+SELECT *
+FROM chirps
+WHERE sqlc.narg('user_id')::uuid IS NULL
+  OR user_id = sqlc.narg('user_id')::uuid
+ORDER BY
+  CASE
+    WHEN sqlc.narg('sort')::text = 'desc'
+    THEN created_at
+  END DESC,
+  CASE
+    WHEN sqlc.narg('sort')::text = 'asc'
+    THEN created_at
+  END ASC;
 
 -- name: GetChirp :one
 SELECT * FROM chirps WHERE id=$1;
+
+-- -- name: GetAllChirpsByUserId :many
+-- SELECT * FROM chirps WHERE user_id=$1;
 
 -- name: DeleteAllChirps :exec
 DELETE FROM chirps;

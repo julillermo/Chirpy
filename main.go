@@ -273,24 +273,45 @@ func main() {
 			CreatedAt string `json:"created_at"`
 			UpdatedAt string `json:"updated_at"`
 			Body      string `json:"body"`
-			UserId    string `json:"user_id"`
+			AuthorID  string `json:"author_id"`
 		}
 
-		chirpsRes, chirpsResErr := apiCfg.dbQueries.GetAllChirps(request.Context())
-		if chirpsResErr != nil {
-			log.Printf("Error with database query: %s", chirpsResErr)
+		query := request.URL.Query()
+		userID := query.Get("author_id")
+		sorting := query.Get("sort")
+
+		userUUID, userUUIDErr := uuid.Parse(userID)
+		if userUUIDErr != nil {
+			log.Printf("Error generating UUID: %s", userUUIDErr)
+		}
+
+		// if len(userID) > 0 {
+		userChirps, userChirpsErr := apiCfg.dbQueries.GetAllChirps(
+			request.Context(),
+			database.GetAllChirpsParams{
+				UserID: uuid.NullUUID{
+					UUID:  userUUID,
+					Valid: userUUIDErr == nil && len(userUUID.String()) > 0,
+				},
+				Sort: sql.NullString{
+					String: sorting,
+					Valid:  sorting == "asc" || sorting == "desc",
+				},
+			},
+		)
+		if userChirpsErr != nil {
+			log.Printf("Error with retrieve chirps query: %s", userChirpsErr)
 			http.Error(writer, "could not retrieve chirps", http.StatusInternalServerError)
-			return
 		}
 
-		response := make([]resJSON, 0, len(chirpsRes))
-		for _, chirp := range chirpsRes {
+		response := make([]resJSON, 0, len(userChirps))
+		for _, chirp := range userChirps {
 			response = append(response, resJSON{
 				Id:        chirp.ID.String(),
 				CreatedAt: chirp.CreatedAt.Time.Format(time.RFC3339),
 				UpdatedAt: chirp.UpdatedAt.Time.Format(time.RFC3339),
 				Body:      chirp.Body,
-				UserId:    chirp.UserID.UUID.String(),
+				AuthorID:  chirp.UserID.UUID.String(),
 			})
 		}
 
@@ -303,6 +324,37 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusOK)
 		writer.Write(data)
+		return
+		// } else {
+		// 	chirpsRes, chirpsResErr := apiCfg.dbQueries.GetAllChirps(request.Context())
+		// 	if chirpsResErr != nil {
+		// 		log.Printf("Error with retrieve chirps query: %s", chirpsResErr)
+		// 		http.Error(writer, "could not retrieve chirps", http.StatusInternalServerError)
+		// 		return
+		// 	}
+
+		// 	response := make([]resJSON, 0, len(chirpsRes))
+		// 	for _, chirp := range chirpsRes {
+		// 		response = append(response, resJSON{
+		// 			Id:        chirp.ID.String(),
+		// 			CreatedAt: chirp.CreatedAt.Time.Format(time.RFC3339),
+		// 			UpdatedAt: chirp.UpdatedAt.Time.Format(time.RFC3339),
+		// 			Body:      chirp.Body,
+		// 			AuthorID:  chirp.UserID.UUID.String(),
+		// 		})
+		// 	}
+
+		// 	data, err := json.Marshal(response)
+		// 	if err != nil {
+		// 		http.Error(writer, "could not encode chirps", http.StatusInternalServerError)
+		// 		return
+		// 	}
+
+		// 	writer.Header().Set("Content-Type", "application/json")
+		// 	writer.WriteHeader(http.StatusOK)
+		// 	writer.Write(data)
+		// 	return
+		// }
 	})
 
 	serveMux.HandleFunc("POST /api/chirps", func(writer http.ResponseWriter, request *http.Request) {
@@ -850,7 +902,7 @@ func main() {
 
 		userUUID, userUUIDErr := uuid.Parse(reqJson.Data.UserID)
 		if userUUIDErr != nil {
-			log.Printf("Error marshalling JSON: %s", userUUIDErr)
+			log.Printf("Error generating UUID: %s", userUUIDErr)
 		}
 
 		if reqJson.Event != "user.upgraded" {

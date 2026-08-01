@@ -43,9 +43,12 @@ func (q *Queries) CreateChirp(ctx context.Context, arg CreateChirpParams) (Chirp
 }
 
 const deleteAllChirps = `-- name: DeleteAllChirps :exec
+
 DELETE FROM chirps
 `
 
+// -- name: GetAllChirpsByUserId :many
+// SELECT * FROM chirps WHERE user_id=$1;
 func (q *Queries) DeleteAllChirps(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, deleteAllChirps)
 	return err
@@ -78,11 +81,28 @@ func (q *Queries) DeleteUserChirpById(ctx context.Context, arg DeleteUserChirpBy
 }
 
 const getAllChirps = `-- name: GetAllChirps :many
-SELECT id, created_at, updated_at, body, user_id FROM chirps
+SELECT id, created_at, updated_at, body, user_id
+FROM chirps
+WHERE $1::uuid IS NULL
+  OR user_id = $1::uuid
+ORDER BY
+  CASE
+    WHEN $2::text = 'desc'
+    THEN created_at
+  END DESC,
+  CASE
+    WHEN $2::text = 'asc'
+    THEN created_at
+  END ASC
 `
 
-func (q *Queries) GetAllChirps(ctx context.Context) ([]Chirp, error) {
-	rows, err := q.db.QueryContext(ctx, getAllChirps)
+type GetAllChirpsParams struct {
+	UserID uuid.NullUUID
+	Sort   sql.NullString
+}
+
+func (q *Queries) GetAllChirps(ctx context.Context, arg GetAllChirpsParams) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, getAllChirps, arg.UserID, arg.Sort)
 	if err != nil {
 		return nil, err
 	}
