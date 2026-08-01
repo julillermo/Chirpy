@@ -17,3 +17,14 @@ SELECT * FROM chirps WHERE id=$1;
 
 -- name: DeleteAllChirps :exec
 DELETE FROM chirps;
+
+-- name: DeleteUserChirpById :execresult
+DELETE FROM chirps
+WHERE 
+  id=$1
+  AND user_id=$2;
+
+-- name: DeleteChirpById :execresult
+DELETE FROM chirps
+WHERE 
+  id=$1;

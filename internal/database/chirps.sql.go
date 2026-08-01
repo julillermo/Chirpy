@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -48,6 +49,32 @@ DELETE FROM chirps
 func (q *Queries) DeleteAllChirps(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, deleteAllChirps)
 	return err
+}
+
+const deleteChirpById = `-- name: DeleteChirpById :execresult
+DELETE FROM chirps
+WHERE 
+  id=$1
+`
+
+func (q *Queries) DeleteChirpById(ctx context.Context, id uuid.UUID) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteChirpById, id)
+}
+
+const deleteUserChirpById = `-- name: DeleteUserChirpById :execresult
+DELETE FROM chirps
+WHERE 
+  id=$1
+  AND user_id=$2
+`
+
+type DeleteUserChirpByIdParams struct {
+	ID     uuid.UUID
+	UserID uuid.NullUUID
+}
+
+func (q *Queries) DeleteUserChirpById(ctx context.Context, arg DeleteUserChirpByIdParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteUserChirpById, arg.ID, arg.UserID)
 }
 
 const getAllChirps = `-- name: GetAllChirps :many

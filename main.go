@@ -388,6 +388,69 @@ func main() {
 		writer.Write(chirResValueMarshal)
 	})
 
+	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		chirpId := r.PathValue("chirpID")
+		chirpUuid, err := uuid.Parse(chirpId)
+		if err != nil {
+			http.Error(w, "invalid chirp ID", http.StatusBadRequest)
+			return
+		}
+
+		authToken, authTokenErr := auth.GetBearerToken(r.Header)
+		if authTokenErr != nil {
+			log.Printf("Error forming bearer token: %s", authTokenErr)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		fmt.Println("authToken check: ", authToken)
+
+		authenticatedUserUUID, authUserUUIDErr := auth.ValidateJWT(authToken, jwtSecret)
+		if authUserUUIDErr != nil {
+			log.Printf("Error validating JWT: %s", authUserUUIDErr)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		retrievedChirp, retrievedChirpErr := apiCfg.dbQueries.GetChirp(r.Context(), chirpUuid)
+		if retrievedChirpErr != nil {
+			log.Printf("Error retrieving chirp: %s", retrievedChirpErr)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if retrievedChirp.UserID.UUID.String() != authenticatedUserUUID.String() {
+			log.Printf("Error mismatched userId to delete chirp")
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		deleteResult, deleteChirpErr := apiCfg.dbQueries.DeleteUserChirpById(r.Context(), database.DeleteUserChirpByIdParams{
+			ID: chirpUuid,
+			UserID: uuid.NullUUID{
+				UUID:  authenticatedUserUUID,
+				Valid: true,
+			},
+		})
+		if deleteChirpErr != nil {
+			log.Printf("Error delete chirp %s by user %s ", chirpUuid, authenticatedUserUUID)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		rowsAffected, rowsErr := deleteResult.RowsAffected()
+		if rowsErr != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		if rowsAffected == 0 {
+			http.Error(w, "chirp not found", http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	serveMux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type reqJSON struct {
 			Email    string `json:"email"`
