@@ -61,6 +61,8 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	platformEnv := os.Getenv("PLATFORM")
 	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
+
 	db, psqlConnectionErr := sql.Open("postgres", dbURL)
 	if psqlConnectionErr != nil {
 		log.Printf("Error marshalling JSON: %s", psqlConnectionErr)
@@ -460,10 +462,11 @@ func main() {
 			Error string `json:"error"`
 		}
 		type resJSON struct {
-			Id        string `json:"id"`
-			CreatedAt string `json:"created_at"`
-			UpdatedAt string `json:"updated_at"`
-			Email     string `json:"email"`
+			Id          string `json:"id"`
+			CreatedAt   string `json:"created_at"`
+			UpdatedAt   string `json:"updated_at"`
+			Email       string `json:"email"`
+			IsChirpyRed bool   `json:"is_chirpy_red"`
 		}
 
 		somethingError := resErr{
@@ -517,10 +520,11 @@ func main() {
 		}
 
 		resData, resDataErr := json.Marshal(resJSON{
-			Id:        updatedUserRes.ID.String(),
-			CreatedAt: updatedUserRes.UpdatedAt.Time.String(),
-			UpdatedAt: updatedUserRes.UpdatedAt.Time.String(),
-			Email:     updatedUserRes.Email,
+			Id:          updatedUserRes.ID.String(),
+			CreatedAt:   updatedUserRes.UpdatedAt.Time.String(),
+			UpdatedAt:   updatedUserRes.UpdatedAt.Time.String(),
+			Email:       updatedUserRes.Email,
+			IsChirpyRed: updatedUserRes.IsChirpyRed.Bool,
 		})
 		if resDataErr != nil {
 			log.Printf("Error marshalling JSON: %s", resDataErr)
@@ -540,10 +544,11 @@ func main() {
 			Error string `json:"error"`
 		}
 		type resJSON struct {
-			Id        string `json:"id"`
-			CreatedAt string `json:"created_at"`
-			UpdatedAt string `json:"updated_at"`
-			Email     string `json:"email"`
+			Id          string `json:"id"`
+			CreatedAt   string `json:"created_at"`
+			UpdatedAt   string `json:"updated_at"`
+			Email       string `json:"email"`
+			IsChirpyRed bool   `json:"is_chirpy_red"`
 		}
 
 		somethingError := resErr{
@@ -583,10 +588,11 @@ func main() {
 		}
 
 		userResValue := resJSON{
-			Id:        userRes.ID.String(),
-			CreatedAt: userRes.CreatedAt.Time.String(),
-			UpdatedAt: userRes.UpdatedAt.Time.String(),
-			Email:     userRes.Email,
+			Id:          userRes.ID.String(),
+			CreatedAt:   userRes.CreatedAt.Time.String(),
+			UpdatedAt:   userRes.UpdatedAt.Time.String(),
+			Email:       userRes.Email,
+			IsChirpyRed: userRes.IsChirpyRed.Bool,
 		}
 
 		userResValueMarshal, userResValueMarshalErr := json.Marshal(userResValue)
@@ -615,6 +621,7 @@ func main() {
 			Email        string `json:"email"`
 			Token        string `json:"token"`
 			RefreshToken string `json:"refresh_token"`
+			IsChirpyRed  bool   `json:"is_chirpy_red"`
 		}
 
 		somethingError := resErr{
@@ -696,6 +703,7 @@ func main() {
 				Email:        userRes.Email,
 				Token:        jwtToken,
 				RefreshToken: refreshToken,
+				IsChirpyRed:  userRes.IsChirpyRed.Bool,
 			})
 			if userResValueMarshalErr != nil {
 				log.Printf("Error marshalling JSON: %s", userResValueMarshalErr)
@@ -799,6 +807,74 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	serveMux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		type reqJSON struct {
+			Event string `json:"event"`
+			Data  struct {
+				UserID string `json:"user_id"`
+			} `json:"data"`
+		}
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			IsChirpyRed bool `json:"is_chirpy_red"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		apiKey, apiKeyErr := auth.GetAPIKey(r.Header)
+		if apiKeyErr != nil || apiKey != polkaKey {
+			log.Printf("Error forming api key from header: %s", apiKeyErr)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		reqJson := reqJSON{}
+		decoder := json.NewDecoder(r.Body)
+		defer r.Body.Close()
+		if decodeErr := decoder.Decode(&reqJson); decodeErr != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write(somethingErrorData)
+			return
+		}
+
+		userUUID, userUUIDErr := uuid.Parse(reqJson.Data.UserID)
+		if userUUIDErr != nil {
+			log.Printf("Error marshalling JSON: %s", userUUIDErr)
+		}
+
+		if reqJson.Event != "user.upgraded" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		} else if reqJson.Event == "user.upgraded" {
+			_, upgradedUserErr := apiCfg.dbQueries.UpgradeUserToRedById(r.Context(), userUUID)
+			if upgradedUserErr != nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+
+			// resjson, resjsonErr := json.Marshal(resJSON{
+			// 	IsChirpyRed: upgradedUser.IsChirpyRed.Bool,
+			// })
+			// if resjsonErr != nil {
+			// 	log.Printf("Error marshalling JSON: %s", resjsonErr)
+			// }
+
+			w.WriteHeader(http.StatusNoContent)
+			// w.Write(resjson)
+			return
+		}
+
 	})
 
 	serveMux.HandleFunc("GET /admin/metrics", func(writer http.ResponseWriter, request *http.Request) {
