@@ -277,7 +277,7 @@ func main() {
 		chirpsRes, chirpsResErr := apiCfg.dbQueries.GetAllChirps(request.Context())
 		if chirpsResErr != nil {
 			log.Printf("Error with database query: %s", chirpsResErr)
-			http.Error(writer, "could not create chirp", http.StatusInternalServerError)
+			http.Error(writer, "could not retrieve chirps", http.StatusInternalServerError)
 			return
 		}
 
@@ -330,8 +330,9 @@ func main() {
 		authToken, authTokenErr := auth.GetBearerToken(request.Header)
 		if authTokenErr != nil {
 			log.Printf("Error forming bearer token: %s", authTokenErr)
-
 		}
+
+		fmt.Println("authToken value check: ", authToken)
 
 		authenticatedUserUUID, authUserUUIDErr := auth.ValidateJWT(authToken, jwtSecret)
 		if authUserUUIDErr != nil {
@@ -467,11 +468,12 @@ func main() {
 			Error string `json:"error"`
 		}
 		type resJSON struct {
-			Id        string `json:"id"`
-			CreatedAt string `json:"created_at"`
-			UpdatedAt string `json:"updated_at"`
-			Email     string `json:"email"`
-			Token     string `json:"token"`
+			Id           string `json:"id"`
+			CreatedAt    string `json:"created_at"`
+			UpdatedAt    string `json:"updated_at"`
+			Email        string `json:"email"`
+			Token        string `json:"token"`
+			RefreshToken string `json:"refresh_token"`
 		}
 
 		somethingError := resErr{
@@ -530,12 +532,29 @@ func main() {
 				log.Printf("Error MakeJWT(): %s", jwtTokenErr)
 			}
 
+			refreshToken := auth.MakeRefreshToken()
+
+			apiCfg.dbQueries.CreateRefreshToken(
+				request.Context(),
+				database.CreateRefreshTokenParams{
+					ID: refreshToken,
+					UserID: uuid.NullUUID{
+						UUID:  userRes.ID,
+						Valid: true,
+					},
+					ExpiresAt: sql.NullTime{
+						Time:  time.Now().AddDate(0, 0, 60),
+						Valid: true,
+					}},
+			)
+
 			userResValueMarshal, userResValueMarshalErr := json.Marshal(resJSON{
-				Id:        userRes.ID.String(),
-				CreatedAt: userRes.CreatedAt.Time.String(),
-				UpdatedAt: userRes.UpdatedAt.Time.String(),
-				Email:     userRes.Email,
-				Token:     jwtToken,
+				Id:           userRes.ID.String(),
+				CreatedAt:    userRes.CreatedAt.Time.String(),
+				UpdatedAt:    userRes.UpdatedAt.Time.String(),
+				Email:        userRes.Email,
+				Token:        jwtToken,
+				RefreshToken: refreshToken,
 			})
 			if userResValueMarshalErr != nil {
 				log.Printf("Error marshalling JSON: %s", userResValueMarshalErr)
@@ -545,7 +564,100 @@ func main() {
 			writer.WriteHeader(http.StatusOK)
 			writer.Write(userResValueMarshal)
 		}
+	})
 
+	serveMux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Token string `json:"token"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		refreshBearerToken, refreshBearerTokenErr := auth.GetBearerToken(r.Header)
+		if refreshBearerTokenErr != nil {
+			log.Printf("Error getting bearer token: %s", refreshBearerTokenErr)
+		}
+
+		refreshTokenExists, refreshTokenExistsErr := apiCfg.dbQueries.ValidateRefreshToken(r.Context(), refreshBearerToken)
+		if refreshTokenExistsErr != nil || !refreshTokenExists {
+			fmt.Println("refreshBearerToken: ", refreshBearerToken)
+			fmt.Println("refreshTokenExists: ", refreshTokenExists)
+			fmt.Println("refreshTokenExistsErr: ", refreshTokenExistsErr)
+
+			log.Printf("Error refresh token with id %s is invalid: %s", refreshBearerToken, refreshTokenExistsErr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		refreshTokenRes, refreshTokenResErr := apiCfg.dbQueries.GetRefreshTokenById(r.Context(), refreshBearerToken)
+		if refreshTokenResErr != nil {
+			log.Printf("Error retrieving refresh token with id %s: %s", refreshBearerToken, refreshTokenResErr)
+		}
+
+		userRes, userResErr := apiCfg.dbQueries.GetUserById(r.Context(), refreshTokenRes.UserID.UUID)
+		if userResErr != nil {
+			log.Printf("Error updating refresh token: %s", userResErr)
+		}
+
+		jwtToken, jwtTokenErr := auth.MakeJWT(userRes.ID, jwtSecret, time.Duration(time.Hour.Seconds())*time.Second)
+		if jwtTokenErr != nil {
+			log.Printf("Error MakeJWT(): %s", jwtTokenErr)
+		}
+
+		resJsonData := resJSON{
+			Token: jwtToken,
+		}
+
+		newAccessTokenData, newAccessTokenDataErr := json.Marshal(resJsonData)
+		if newAccessTokenDataErr != nil {
+			log.Printf("Error marshalling JSON: %s", newAccessTokenDataErr)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write(somethingErrorData)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(newAccessTokenData)
+	})
+
+	serveMux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		refreshBearerToken, refreshBearerTokenErr := auth.GetBearerToken(r.Header)
+		if refreshBearerTokenErr != nil {
+			log.Printf("Error getting bearer token: %s", refreshBearerTokenErr)
+		}
+
+		_, updateRefreshTokenErr := apiCfg.dbQueries.UpdateRefreshTokenById(
+			r.Context(),
+			database.UpdateRefreshTokenByIdParams{
+				ID: refreshBearerToken,
+				RevokedAt: sql.NullTime{
+					Time:  time.Now(),
+					Valid: true,
+				},
+			},
+		)
+		if updateRefreshTokenErr != nil {
+			log.Printf("Error updating refresh token: %s", updateRefreshTokenErr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	serveMux.HandleFunc("GET /admin/metrics", func(writer http.ResponseWriter, request *http.Request) {
@@ -571,7 +683,7 @@ func main() {
 		}
 
 		writer.WriteHeader(http.StatusOK)
-		//? Not necessary if DELETE ON CASCADE is specified in db
+		//* Not necessary if ON DELETE CASCADE is specified in db
 		// apiCfg.dbQueries.DeleteAllChirps(request.Context())
 		apiCfg.dbQueries.DeleteAllUsers(request.Context())
 	})
