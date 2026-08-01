@@ -332,8 +332,6 @@ func main() {
 			log.Printf("Error forming bearer token: %s", authTokenErr)
 		}
 
-		fmt.Println("authToken value check: ", authToken)
-
 		authenticatedUserUUID, authUserUUIDErr := auth.ValidateJWT(authToken, jwtSecret)
 		if authUserUUIDErr != nil {
 			log.Printf("Error validating JWT: %s", authUserUUIDErr)
@@ -388,6 +386,86 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusCreated)
 		writer.Write(chirResValueMarshal)
+	})
+
+	serveMux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
+		type reqJSON struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		type resErr struct {
+			Error string `json:"error"`
+		}
+		type resJSON struct {
+			Id        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
+			Email     string `json:"email"`
+		}
+
+		somethingError := resErr{
+			Error: "Something went wrong",
+		}
+		somethingErrorData, sometingErrDetails := json.Marshal(somethingError)
+		if sometingErrDetails != nil {
+			log.Printf("Error marshalling JSON: %s", sometingErrDetails)
+		}
+
+		authToken, authTokenErr := auth.GetBearerToken(r.Header)
+		if authTokenErr != nil {
+			log.Printf("Error forming bearer token: %s", authTokenErr)
+		}
+
+		authenticatedUserUUID, authUserUUIDErr := auth.ValidateJWT(authToken, jwtSecret)
+		if authUserUUIDErr != nil {
+			log.Printf("Error validating JWT: %s", authUserUUIDErr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		defer r.Body.Close()
+
+		reqJsonDecoded := reqJSON{}
+		err := decoder.Decode(&reqJsonDecoded)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write(somethingErrorData)
+			return
+		}
+
+		hashedPassword, hashedPasswordErr := auth.HashPassword(reqJsonDecoded.Password)
+
+		updatedUserRes, updatedUserResErr := apiCfg.dbQueries.UpdateUserById(r.Context(), database.UpdateUserByIdParams{
+			ID: authenticatedUserUUID,
+			Email: sql.NullString{
+				String: reqJsonDecoded.Email,
+				Valid:  len(reqJsonDecoded.Email) > 0,
+			},
+			HashedPassword: sql.NullString{
+				String: hashedPassword,
+				Valid:  hashedPasswordErr == nil,
+			},
+		})
+		if updatedUserResErr != nil {
+			log.Printf("Error updating user with id %s", authenticatedUserUUID.String())
+		}
+
+		resData, resDataErr := json.Marshal(resJSON{
+			Id:        updatedUserRes.ID.String(),
+			CreatedAt: updatedUserRes.UpdatedAt.Time.String(),
+			UpdatedAt: updatedUserRes.UpdatedAt.Time.String(),
+			Email:     updatedUserRes.Email,
+		})
+		if resDataErr != nil {
+			log.Printf("Error marshalling JSON: %s", resDataErr)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resData)
 	})
 
 	serveMux.HandleFunc("POST /api/users", func(writer http.ResponseWriter, request *http.Request) {

@@ -17,3 +17,13 @@ SELECT * FROM users WHERE id=$1;
 
 -- name: DeleteAllUsers :exec
 DELETE FROM users;
+
+-- name: UpdateUserById :one
+UPDATE users
+SET
+  updated_at = NOW(),
+  email = COALESCE(sqlc.narg('email'), email),
+  hashed_password = COALESCE(sqlc.narg('hashed_password'), hashed_password)
+WHERE
+  id=sqlc.arg('id')
+RETURNING *;
