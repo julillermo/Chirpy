@@ -80,9 +80,9 @@ boot.dev backend in go course
      )
      RETURNING *;
      ```
-
    - At the root of the project (where `sqlc.yaml` should also exist) run:
      - `sqlc generate`
+   - When you want your quries to work based on a transaction (atomic / race-condition consideration), you'd have to specify transactions in the application code.
 
 4. Use the generated go query functions as part of your code.
    - You may need to transform your variables to align with the types of the functions.
