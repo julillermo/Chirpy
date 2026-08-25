@@ -6,7 +6,7 @@ boot.dev backend in go course
 
 0. Prerequisites
    - Install postgresql (or your prefered database)
-     - Take note of your "connection string" that follows this format: `postgres://username:password@host:port/database`
+     - Create a database and take note of your "connection string" that follows this format: `postgres://username:password@host:port/database`
        - Note that note all users have the same access to the database, so some of the commands in this guide may fail when using a specific user with less permissions.
      - Save the "connection string" as `DB_URL=<value>`.
      - The specific variable `DB_URL` can be changed as long as it's consistent within the application.
@@ -38,7 +38,7 @@ boot.dev backend in go course
 
 1. Create an SQL Query `.sql` migration file (optional)
    - This is only needed when you want to make modifications to the database setup (e.g. adding a table or modifying columns, etc.).
-     - For this project, the file is saved in `/sql/schema/`, but this isn't scrict.
+     - For this project, the file is saved in `/sql/schema/`, but this isn't strict.
    - Make sure to following the naming format: `<migration#>_<table_name>.sql` (e.g. `001_users.sql`)
      - Prepending with 0's is optional; `001` is equivalent to both `1` and `0001`.
      - Add (required) comments to the `.sql` migration file to indicate up and down migrations:
@@ -64,7 +64,7 @@ boot.dev backend in go course
      - `goose postgres <connection_string> down` to revert
 3. Use sqlc to generate the application code equivalent of the queries.
    - Write the query as a `.sql` file.
-     - For this project, we're saving to `/sql/queries`, but it could be anything as long as state it in your `sqlc.yaml`
+     - For this project, we're saving to `/sql/queries`, but it could be anything as long as it's stated it in your `sqlc.yaml`
      - Should generally be similar to the following syntax. Consult the [documentation](https://docs.sqlc.dev/en/latest/tutorials/getting-started-postgresql.html) for more specicic implementations.
        - Note that the comments are required.
        - I believe you can have more than 1 query in 1 file.
@@ -80,6 +80,7 @@ boot.dev backend in go course
      )
      RETURNING *;
      ```
+
    - At the root of the project (where `sqlc.yaml` should also exist) run:
      - `sqlc generate`
    - When you want your quries to work based on a transaction (atomic / race-condition consideration), you'd have to specify transactions in the application code.
@@ -87,7 +88,7 @@ boot.dev backend in go course
 4. Use the generated go query functions as part of your code.
    - You may need to transform your variables to align with the types of the functions.
    - You also need to have setup the db connection prior.
-   - Refer to example in [main.go](/main.go) as a guide.
+   - Refer to example in [main.go](./main.go) as a guide.
 
 # Authentication
 
